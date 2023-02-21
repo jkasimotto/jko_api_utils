@@ -1,7 +1,59 @@
-# Python-related files
-*.pyc
-*.pyo
+# Byte-compiled / optimized / DLL files
 __pycache__/
+*.py[cod]
+*$py.class
 
-# Virtual environment
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+.eggs/
+
+# Virtual environments
 venv/
+env/
+
+# Testing
+.tox/
+.pytest_cache/
+
+# VSCode
+.vscode/
+
+# Environment variables
+.env
+
+# Compiled Python modules
+*.so
+*.pyd
+
+# Logs
+*.log
+logs/
+
+# Data and media files
+media/
+*.csv
+*.xls
+*.xlsx
+*.json
+*.db
+
+# Configuration files
+settings.ini
+config.yml
+
+# Compiled executables
+*.exe
+*.out
+
+# Package files
+*.egg
+*.whl
+
+# Other
+*~
+.DS_Store
+.idea/
+*.bak
+*.swp
