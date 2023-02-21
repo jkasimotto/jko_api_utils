@@ -1,3 +1,4 @@
+import collections
 import inspect
 import os
 from functools import wraps
@@ -47,7 +48,7 @@ def determine_mode_and_encoding(data, data_format, append=False):
 
     if mode not in ["w", "wb", "a", "ab"]:
         raise ValueError("Invalid mode")
-    
+
     if encoding not in [None, "utf-8"]:
         raise ValueError("Invalid encoding")
 
@@ -133,11 +134,11 @@ def save_data_decorator(func):
     :raises ValueError: If the destination file is not provided and the return_data flag is False.
     """
     @wraps(func)
-    def wrapper(*args, dest=None, return_data=True, create_dirs=False, data_format=None, **kwargs):
+    def wrapper(*args, dests=None, return_data=True, create_dirs=False, data_format=None, **kwargs):
         """
         Saves the data returned by the decorated function to a file.
 
-        :param dest: The destination file path. If None and return_data is False, a ValueError is raised.
+        :param dests: A list of destination file path. If None and return_data is False, a ValueError is raised.
         :param return_data: A flag indicating whether to return the data or not.
         :param create_dirs: A flag indicating whether to create the directories in the path to the file if they do not exist.
         :param data_format: The format of the data. If None, the format is inferred from the type of the data.
@@ -145,28 +146,35 @@ def save_data_decorator(func):
         :raises ValueError: If the destination file does not exist and create_dirs is False, or if an invalid data format is specified.
         :raises OSError: If an error occurs while writing to the file.
         """
-        validate_arguments(dest, return_data)
-
+        validate_arguments(dests, return_data)
+    
         if dest is not None:
-            create_dirs_if_needed(dest, create_dirs)
+            if not isinstance(dest, list):
+                dest = [dest]
+            for file_path in dest:
+                create_dirs_if_needed(file_path, create_dirs)
 
-        if inspect.isgeneratorfunction(func):
-            results = []
-            for result in func(*args, **kwargs):
-                mode, encoding = determine_mode_and_encoding(
-                    result, data_format)
-                save_data_to_file(result, dest, mode, encoding)
-                if return_data:
-                    results.append(result)
+        if dests is not None:
+            create_dirs_if_needed(dests, create_dirs)
+
+        result = func(*args, **kwargs)
+        if isinstance(result, str) or isinstance(result, bytes):
+            results = [result]
+        elif is_generator(result):
+            results = result
         else:
-            result = func(*args, **kwargs)
+            raise TypeError("The decorated function must return a string or bytes, or an iterable.")
+
+        data_to_return = []
+        for result in results:
             mode, encoding = determine_mode_and_encoding(result, data_format)
-            save_data_to_file(result, dest, mode, encoding)
+            save_data_to_file(result, dests, mode, encoding)
             if return_data:
-                results = result
-        
+                data_to_return.append(result)
+
         if return_data:
-            return results
-        return None
+            if len(data_to_return) == 1:
+                return data_to_return[0]
+            return data_to_return
 
     return wrapper

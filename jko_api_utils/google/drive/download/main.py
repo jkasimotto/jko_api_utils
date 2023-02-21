@@ -1,36 +1,29 @@
 import io
 import os
 
-from google.oauth2.credentials import Credentials
-from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaIoBaseDownload
 
 from jko_api_utils.google.drive.service.get_service import get_service
+from jko_api_utils.utils.save_data import save_data_decorator
 
 
-def download(
-    client_secret, 
-    drive_folder_id, 
-    dest_dir=None, 
-    max=None, 
-    duplicate="skip", 
-    exclude=None
-):
+@save_data_decorator
+def download(client_secret, drive_folder_id, max=None, duplicate="skip", exclude=None):
     service = get_service(
-        client_secret, 
+        client_secret,
         ['https://www.googleapis.com/auth/drive.readonly']
     )
     files = get_files_in_folder(service, drive_folder_id, max)
 
     results = download_file_content(
-        service, 
-        files, 
-        dest_dir, 
+        service,
+        files,
+        dest_dir,
         max,
-        duplicate, 
+        duplicate,
         exclude
-        )
+    )
     return results
 
 
