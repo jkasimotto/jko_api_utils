@@ -5,26 +5,40 @@ from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaIoBaseDownload
 
 from jko_api_utils.google.drive.service.get_service import get_service
-from jko_api_utils.utils.save_data import save_data_decorator
+from jko_api_utils.utils.save_data import DuplicateStrategy, save_to_file_decorator
 
 
-@save_data_decorator
-def download(client_secret, drive_folder_id, max=None, duplicate="skip", exclude=None):
-    service = get_service(
-        client_secret,
-        ['https://www.googleapis.com/auth/drive.readonly']
-    )
+@save_to_file_decorator
+def download(drive_folder_id, client_secret=None, service=None, max=None, exclude=None, path_list=None, return_data=True, create_dirs=True, duplicate_strategy=DuplicateStrategy.SKIP):
+    """Downloads files from a Google Drive folder.
+
+    Args:
+        drive_folder_id (str): The ID of the Google Drive folder to download files from.
+        client_secret (str, optional): The path to a JSON file containing the client secret for authentication.
+        service (googleapiclient.discovery.Resource, optional): An authorized Drive API service instance. If None, one will be created from the client_secret.
+        max (int, optional): The maximum number of files to download. If None, downloads all files.
+        exclude (list, optional): A list of filenames to exclude from the download.
+        path_list: A list of destination file path. If None and return_data is False, a ValueError is raised.
+        return_data: A flag indicating whether to return the data or not.
+        create_dirs: A flag indicating whether to create the directories in the path to the file if they do not exist.
+        duplicate_strategy: The strategy to be used when a file already exists. If the strategy is DuplicateStrategy.SKIP, the file is skipped. If the strategy is DuplicateStrategy.OVERWRITE, the file is overwritten. If the strategy is DuplicateStrategy.RENAME, the file is renamed.
+
+    Yields:
+        The contents of each downloaded file as a byte string.
+    """
+    if service is None and client_secret is None:
+        raise ValueError(
+            "Either client_secret or service must be specified.")
+    elif service is None:
+        service = get_service(
+            client_secret, ['https://www.googleapis.com/auth/drive.readonly'])
+
     files = get_files_in_folder(service, drive_folder_id, max)
 
-    results = download_file_content(
-        service,
-        files,
-        dest_dir,
-        max,
-        duplicate,
-        exclude
-    )
-    return results
+    for file in files:
+        if exclude is not None and file['name'] in exclude:
+            continue
+        yield get_file_content(service, file)
 
 
 def get_files_in_folder(service, folder_id, max=None):
@@ -55,114 +69,6 @@ def get_files_in_folder(service, folder_id, max=None):
     return files if max is None else files[:max]
 
 
-def download_file_content(service, files, dest_dir=None, max=None, duplicate="skip", exclude=None, mime_type=None):
-    """Downloads files from a Google Drive folder.
-
-    Args:
-        service (googleapiclient.discovery.Resource): An authorized Drive API service instance.
-        files (list): A list of files to download.
-        dest_dir (str, optional): The local destination directory to download files to. If None, returns the downloaded files.
-        max (int, optional): The maximum number of files to download. If None, downloads all files.
-        duplicate (str, optional): How to handle duplicate file names. Must be one of 'skip', 'overwrite', or 'rename'.
-        exclude (list, optional): A list of file names to exclude from the download.
-
-    Returns:
-        A list of file paths of the downloaded files if to is not None, otherwise a list of byte strings of the downloaded files.
-    """
-    downloaded_files = []
-    for file in files:
-        if exclude is not None and file['name'] in exclude:
-            continue
-        if max is not None and len(downloaded_files) >= max:
-            break
-        if dest_dir is None:
-            # If to is None, return the downloaded files as byte strings
-            content = get_file_content(
-                service, file['id'], mime_type=mime_type)
-            downloaded_files.append(content)
-        else:
-            # If to is not None, download the files to the local destination directory first checking for duplicate file names
-            file_name = file['name']
-            file_path = os.path.join(dest_dir, file_name)
-            # Handle duplicate file names
-            if os.path.exists(file_path):
-                new_path = handle_duplicate(file_path, duplicate)
-                if new_path is None:
-                    continue
-                file_path = new_path
-            # Write the content to the file
-            content = get_file_content(
-                service, file['id'], mime_type=mime_type)
-            with open(file_path, "wb") as f:
-                f.write(content)
-    return downloaded_files
-
-
-def handle_duplicate(file_path, duplicate):
-    """Handles duplicate files.
-
-    Args:
-        file_path (str): The file path to handle.
-        duplicate (str): How to handle duplicate file names. Must be one of 'skip', 'overwrite', or 'rename'.
-
-    Returns:
-        A new file path with a modified name if duplicate is 'rename', otherwise None.
-    """
-    duplicate_functions = {
-        "skip": handle_duplicate_skip,
-        "overwrite": handle_duplicate_overwrite,
-        "rename": handle_duplicate_rename
-    }
-    if duplicate not in duplicate_functions:
-        raise ValueError(
-            f"Duplicate setting '{duplicate}' is not valid. Must be one of 'skip', 'overwrite', or 'rename'."
-        )
-    else:
-        return duplicate_functions[duplicate](file_path)
-
-
-def handle_duplicate_skip(file_path):
-    """Handles the 'skip' duplicate setting.
-
-    Args:
-        file_path (str): The file path to handle.
-
-    Returns:
-        None
-    """
-    return
-
-
-def handle_duplicate_overwrite(file_path):
-    """Handles the 'overwrite' duplicate setting.
-
-    Args:
-        file_path (str): The file path to handle.
-
-    Returns:
-        None
-    """
-    os.remove(file_path)
-
-
-def handle_duplicate_rename(file_path):
-    """Handles the 'rename' duplicate setting.
-
-    Args:
-        file_path (str): The file path to handle.
-
-    Returns:
-        A new file path with a modified name.
-    """
-    file_name, file_extension = os.path.splitext(file_path)
-    index = 1
-    while os.path.exists(file_path):
-        file_name = f"{file_name} ({index})"
-        file_path = os.path.join(to, f"{file_name}{file_extension}")
-        index += 1
-    return file_path
-
-
 def get_file_content(service, file_id, mime_type=None):
     """Gets the media content of a file in Google Drive.
 
@@ -180,10 +86,10 @@ def get_file_content(service, file_id, mime_type=None):
 
     # If the file is a Google Workspace document, export it as the specified MIME type
     if file_mimetype.startswith("application/vnd.google-apps"):
-        if mimeType is None:
+        if mime_type is None:
             raise ValueError(
                 "MIME type must be specified for Google Workspace documents")
-        content = export_google_workspace_document(service, file_id, mimeType)
+        content = export_google_workspace_document(service, file_id, mime_type)
     else:
         # Otherwise, download the file content
         request = service.files().get_media(fileId=file_id)

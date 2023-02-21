@@ -3,5 +3,5 @@ from jko_api_utils.utils.save_data import (
     determine_mode_and_encoding,
     save_data_to_file,
     convert_data_to_string,
-    save_data_decorator,
+    save_to_file_decorator,
 )
