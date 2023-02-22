@@ -31,30 +31,24 @@ def create_dirs_if_needed(path, create_missing_dirs=False):
         os.makedirs(path, exist_ok=True)
 
 
-def determine_mode_and_encoding(data, data_format, append=False):
+def determine_mode_and_encoding(data, append=False):
     """
     Determines the appropriate mode and encoding for writing the given data to a file based on its format.
 
     :param data: The data to be written to the file.
     # TODO: Enum, json, yaml
-    :param data_format: The format of the data (e.g., "text", "binary"). If None, the format is determined automatically.
     :param append: Whether to append to the file or overwrite it.
     :return: A tuple of the mode and encoding to use for writing the data to a file.
     :raises ValueError: If the data format is invalid.
     """
     if append:
-        mode = "a" if data_format == "text" or (
-            data_format is None and isinstance(data, str)) else "ab"
-        encoding = "utf-8" if data_format == "text" or (
-            data_format is None and isinstance(data, str)) else None
+        mode = "a" if isinstance(data, str) else "ab"
+        encoding = "utf-8" if isinstance(data, str) else None
     else:
-        mode = "w" if data_format == "text" or (
-            data_format is None and isinstance(data, str)) else "wb"
-        encoding = "utf-8" if data_format == "text" or (
-            data_format is None and isinstance(data, str)) else None
-
-    if mode not in ["w", "wb", "a", "ab"]:
-        raise ValueError("Invalid mode")
+        mode = "w" if isinstance(data, str) else "wb"
+        encoding = "utf-8" if isinstance(data, str) else None
+        if mode not in ["w", "wb", "a", "ab"]:
+            raise ValueError("Invalid mode")
 
     if encoding not in [None, "utf-8"]:
         raise ValueError("Invalid encoding")
@@ -150,10 +144,11 @@ def preprocess_duplicate_paths(path_list, duplicate_strategy: DuplicateStrategy)
     # Remove paths that are to be skipped
     for i in sorted(paths_to_skip, reverse=True):
         del path_list[i]
+    # TODO: This doesn't check if multiple paths are the same
     return path_list
 
 
-def process_path_list(path_list, create_dirs: bool, duplicate_strategy: DuplicateStrategy):
+def preprocess_path_list(path_list, create_dirs: bool, duplicate_strategy: DuplicateStrategy):
     if path_list is not None:
         if not isinstance(path_list, list):
             path_list = [path_list]
@@ -163,82 +158,37 @@ def process_path_list(path_list, create_dirs: bool, duplicate_strategy: Duplicat
     return path_list
 
 
-def save_to_file_decorator(func):
+def save_to_file(data_iter, path_list=None, return_data=True, create_dirs=False, duplicate_strategy=DuplicateStrategy.SKIP, **kwargs):
     """
-    A decorator that gives the option to save the data returned by the decorated function to a file.
+    Saves the data to a file.
 
-    :param func: The function to be decorated. Either a generator or a function that returns a string or bytes.
-    :return: A wrapper function that saves the data returned by the decorated function to a file.
-    :raises TypeError: If the decorated function does not return a string or bytes.
-    :raises ValueError: If the destination file is not provided and the return_data flag is False.
+    :param data_iter: The data to be processed. Can be either a list or a generator.
+    :param path_list: A list of destination file path. If None and return_data is False, a ValueError is raised.
+    :param return_data: A flag indicating whether to return the data or not.
+    :param create_dirs: A flag indicating whether to create the directories in the path to the file if they do not exist.
+    :param duplicate_strategy: The strategy to be used when a file already exists. If the strategy is DuplicateStrategy.SKIP, the file is skipped. If the strategy is DuplicateStrategy.OVERWRITE, the file is overwritten. If the strategy is DuplicateStrategy.RENAME, the file is renamed.
+    :return: The data from the function, or None if return_data is False.
+    :raises ValueError: If the destination file does not exist and create_dirs is False, or if an invalid data format is specified.
+    :raises OSError: If an error occurs while writing to the file.
     """
-    @wraps(func)
-    def wrapper(*args, path_list=None, return_data=True, create_dirs=False, duplicate_strategy=DuplicateStrategy.SKIP, **kwargs):
-        """
-        Saves the data returned by the decorated function to a file.
+    validate_arguments(path_list, return_data)
 
-        :param path_list: A list of destination file path. If None and return_data is False, a ValueError is raised.
-        :param return_data: A flag indicating whether to return the data or not.
-        :param create_dirs: A flag indicating whether to create the directories in the path to the file if they do not exist.
-        :param data_format: The format of the data. If None, the format is inferred from the type of the data.
-        :param duplicate_strategy: The strategy to be used when a file already exists. If the strategy is DuplicateStrategy.SKIP, the file is skipped. If the strategy is DuplicateStrategy.OVERWRITE, the file is overwritten. If the strategy is DuplicateStrategy.RENAME, the file is renamed.
-        :return: The data from the function, or None if return_data is False.
-        :raises ValueError: If the destination file does not exist and create_dirs is False, or if an invalid data format is specified.
-        :raises OSError: If an error occurs while writing to the file.
-        """
-        validate_arguments(path_list, return_data)
+    path_list = preprocess_path_list(path_list, create_dirs, duplicate_strategy)
 
-        path_list = process_path_list(path_list, create_dirs, duplicate_strategy)
+    data_to_return = []
+    # Raises ValueError if data_iter and path_list have different lengths
+    if path_list is not None:
+        for path, data in zip(path_list, data_iter, strict=True):
+            mode, encoding = determine_mode_and_encoding(data)
+            save_data_to_file(data, path, mode, encoding)
+            if return_data:
+                data_to_return.append(data)
+    else:
+        # If path_list is None, return_data must be True
+        for data in data_iter:
+            data_to_return.append(data)
 
-        result = func(*args, **kwargs)
-        if isinstance(result, str) or isinstance(result, bytes):
-            results = [result]
-        elif is_generator(result):
-            results = result
-        else:
-            raise TypeError(
-                "The decorated function must return a string or bytes, or an iterable.")
-
-        data_to_return = []
-        # Raises ValueError if path_list and results have different lengths
-        if path_list is not None:
-            for dest, result in zip(path_list, results, strict=True):
-                mode, encoding = determine_mode_and_encoding(result, data_format)
-                save_data_to_file(result, dest, mode, encoding)
-                if return_data:
-                    data_to_return.append(result)
-        else:
-            # If path_list is None, return_data must be True
-            for result in results:
-                data_to_return.append(result)
-
-        if return_data:
-            if len(data_to_return) == 1:
-                return data_to_return[0]
-            return data_to_return
-
-    return wrapper
-
-
-def handle_duplicate_decorator(func):
-    @wraps(func)
-    def wrapper(*args, path_list=None, duplicates_strategy=DuplicateStrategy.SKIP, **kwargs):
-        if path_list is None:
-            raise ValueError("The 'path_list' parameter must be set.")
-        if not isinstance(path_list, list):
-            path_list = [path_list]
-        for i in range(len(path_list)):
-            path = Path(path_list[i])
-            if path.exists():
-                if duplicates_strategy == DuplicateStrategy.RENAME:
-                    j = 1
-                    while True:
-                        path = path.with_name(f"{path.stem}_{j}{path.suffix}")
-                        if not path.exists():
-                            path_list[i] = str(path)
-                            break
-                        j += 1
-                elif duplicates_strategy == DuplicateStrategy.SKIP:
-                    continue
-        return func(*args, path_list=path_list, **kwargs)
-    return wrapper
+    if return_data:
+        if len(data_to_return) == 1:
+            return data_to_return[0]
+        return data_to_return

@@ -1,7 +1,1 @@
-from replicate_api_utils.whisper.main import (
-    transcribe, 
-    transcribe_dir, 
-    transcribe_dirs, 
-    transcribe_file, 
-    transcribe_files
-)
+from jko_api_utils.replicate.whisper import batch_transcribe

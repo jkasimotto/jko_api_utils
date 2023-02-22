@@ -1,72 +1,126 @@
 import io
 import os
+from pathlib import Path
 
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaIoBaseDownload
 
-from jko_api_utils.google.drive.service.get_service import get_service
-from jko_api_utils.utils.save_data import DuplicateStrategy, save_to_file_decorator
+from jko_api_utils.google.drive.service.get_service import get_service, get_service_with_service_or_secret_path
+from jko_api_utils.utils.save_data import DuplicateStrategy, save_to_file
 
 
-@save_to_file_decorator
-def download(drive_folder_id, client_secret=None, service=None, max=None, exclude=None, path_list=None, return_data=True, create_dirs=True, duplicate_strategy=DuplicateStrategy.SKIP):
-    """Downloads files from a Google Drive folder.
+def download(
+        drive_folder_id,
+        local_folder_path=None,
+        max=None,
+        exclude=None,
+        return_data=True,
+        create_dirs=True,
+        duplicate_strategy=DuplicateStrategy.SKIP,
+        client_secret=None,
+        service=None,
+):
+    """
+    Downloads files from a Google Drive folder to a local directory and/or returns file content as a generator.
 
     Args:
         drive_folder_id (str): The ID of the Google Drive folder to download files from.
-        client_secret (str, optional): The path to a JSON file containing the client secret for authentication.
-        service (googleapiclient.discovery.Resource, optional): An authorized Drive API service instance. If None, one will be created from the client_secret.
-        max (int, optional): The maximum number of files to download. If None, downloads all files.
-        exclude (list, optional): A list of filenames to exclude from the download.
-        path_list: A list of destination file path. If None and return_data is False, a ValueError is raised.
-        return_data: A flag indicating whether to return the data or not.
-        create_dirs: A flag indicating whether to create the directories in the path to the file if they do not exist.
-        duplicate_strategy: The strategy to be used when a file already exists. If the strategy is DuplicateStrategy.SKIP, the file is skipped. If the strategy is DuplicateStrategy.OVERWRITE, the file is overwritten. If the strategy is DuplicateStrategy.RENAME, the file is renamed.
+        local_folder_path (str or Path, optional): The local directory to download files to. Defaults to None.
+        max (int, optional): The maximum number of files to download. Defaults to None.
+        exclude (list of str, optional): A list of file names to exclude from the download. Defaults to None.
+        return_data (bool, optional): Whether to return file content as a generator. Defaults to True.
+        create_dirs (bool, optional): Whether to create the local directory if it doesn't exist. Defaults to True.
+        duplicate_strategy (DuplicateStrategy, optional): The strategy to use for files that already exist in the local directory. Defaults to DuplicateStrategy.SKIP.
+        client_secret (str or Path, optional): The path to the Google Drive client secret file. Required if service is not provided. Defaults to None.
+        service (googleapiclient.discovery.Resource, optional): An authenticated Google Drive API service object. Required if client_secret is not provided. Defaults to None.
 
     Yields:
-        The contents of each downloaded file as a byte string.
+        list of bytes: A list of file content bytes, if return_data is True.
+
+    Raises:
+        ValueError: If both client_secret and service are None.
     """
-    if service is None and client_secret is None:
-        raise ValueError(
-            "Either client_secret or service must be specified.")
-    elif service is None:
-        service = get_service(
-            client_secret, ['https://www.googleapis.com/auth/drive.readonly'])
+    service = get_service_with_service_or_secret_path(service, client_secret)
+    local_folder_path = Path(
+        local_folder_path) if local_folder_path is not None else None
 
-    files = get_files_in_folder(service, drive_folder_id, max)
+    # Give the user the option to create the local folder if it doesn't exist
+    if local_folder_path is not None and create_dirs:
+        local_folder_path.mkdir(parents=True, exist_ok=True)
 
-    for file in files:
-        if exclude is not None and file['name'] in exclude:
-            continue
-        yield get_file_content(service, file)
+    # Get the files in the folder
+    file_count = 0
+    file_batch_contents = []
+    file_batch_gen = gen_files_in_folder(
+        service, drive_folder_id, batch_size=100)
+    for file_batch in file_batch_gen:
+        for file in file_batch:
+
+            # Give the user the option to exclude files from the download
+            if exclude is not None and file['name'] in exclude:
+                continue
+
+            # Give the user the option to skip, rename or overwrite files that already exist
+            if local_folder_path is not None:
+                file_path = local_folder_path / file['name']
+                if file_path.exists():
+                    if duplicate_strategy == DuplicateStrategy.SKIP:
+                        print(f"Skipping {file['name']}")
+                        continue
+                    elif duplicate_strategy == DuplicateStrategy.RENAME:
+                        k = 1
+                        while file_path.exists():
+                            file_path = file_path.with_name(
+                                f"{file_path.stem}_{k}{file_path.suffix}")
+                            k += 1
+                    elif duplicate_strategy == DuplicateStrategy.OVERWRITE:
+                        pass
+
+            # Give the user the option to limit the number of files downloaded
+            if max is not None and file_count >= max:
+                yield file_batch_contents
+                break
+
+            # Download the file content
+            file_content = get_file_content(service, file['id'])
+            file_count += 1
+
+            # Give the user the option to download to a local folder
+            # The file_path variable is set above
+            if local_folder_path is not None:
+                with open(file_path, "wb") as f:
+                    f.write(file_content)
+
+            # Only return the data if return_data is True otherwise it may consume too much memory.
+            if return_data:
+                file_batch_contents.append(file_content)
+
+        yield file_batch_contents
 
 
-def get_files_in_folder(service, folder_id, max=None):
-    """Returns a list of files in a Google Drive folder.
+def gen_files_in_folder(service, folder_id, batch_size=100):
+    """Returns a generator that yields batches of files in a Google Drive folder.
 
     Args:
         service (googleapiclient.discovery.Resource): An authorized Drive API service instance.
         folder_id (str): The ID of the Google Drive folder to query.
-        max (int, optional): The maximum number of files to return. If None, returns all files.
+        batch_size (int, optional): The number of files to return in each batch.
 
-    Returns:
-        A list of files in the specified folder.
+    Yields:
+        A batch of files in the specified folder.
     """
 
-    files = []
     query = f"'{folder_id}' in parents and trashed = false"
     results = service.files().list(
-        q=query, fields="nextPageToken, files(id, name, mimeType, size)").execute()
+        q=query, fields="nextPageToken, files(id, name, mimeType, size)", pageSize=batch_size).execute()
     while True:
         items = results.get('files', [])
-        files.extend(items)
+        yield items
         next_page_token = results.get('nextPageToken', None)
-        if next_page_token is None or (max is not None and len(files) >= max):
+        if next_page_token is None:
             break
         results = service.files().list(q=query, fields="nextPageToken, files(id, name, mimeType, size)",
-                                       pageToken=next_page_token).execute()
-
-    return files if max is None else files[:max]
+                                       pageToken=next_page_token, pageSize=batch_size).execute()
 
 
 def get_file_content(service, file_id, mime_type=None):
