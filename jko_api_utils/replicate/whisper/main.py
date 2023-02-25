@@ -5,7 +5,7 @@ from typing import List, Union
 import replicate
 
 
-def batch_transcribe(inputs: List[Union[str, bytes]]) -> List[str]:
+def batch_transcribe(inputs: List[Union[str, bytes]], model="base") -> List[str]:
     """Batch transcribe a list of audio files or raw audio data inputs using the Whisper API.
 
     Args:
@@ -19,12 +19,12 @@ def batch_transcribe(inputs: List[Union[str, bytes]]) -> List[str]:
 
     transcriptions = []
 
-    for input in enumerate(inputs):
+    for input in inputs:
         # Check if input is file path or raw audio data
         if isinstance(input, str):
-            transcription = _transcribe_file(input)
+            transcription = _transcribe_file(input, model)
         else:
-            transcription = _transcribe_raw(input)
+            transcription = _transcribe_raw(input, model)
         transcriptions.append(transcription)
 
     return transcriptions
@@ -40,13 +40,13 @@ def get_whisper_version(version=None):
     return version
 
 
-def _call_whisper_api(audio, version=None, model="base"):
+def _call_whisper_api(audio_file, version=None, model="base"):
     if version is None:
         version = get_whisper_version()
     # Transcribe the audio
     try:
         result = version.predict(
-            audio=audio,
+            audio=audio_file,
             model=model
         )["transcription"]
     except Exception as e:
@@ -57,7 +57,7 @@ def _call_whisper_api(audio, version=None, model="base"):
     return result
 
 
-def _transcribe_file(input_file: str) -> str:
+def _transcribe_file(input_file: str, model: str) -> str:
     """Transcribe a single audio file using the Whisper API.
 
     Args:
@@ -66,13 +66,11 @@ def _transcribe_file(input_file: str) -> str:
     Returns:
         The transcription output as a string.
     """
-    with open(input_file, "rb") as f:
-        audio_data = f.read()
-    transcription = _call_whisper_api(audio_data)
+    transcription = _call_whisper_api(open(input_file, "rb"), model=model)
     return transcription
 
 
-def _transcribe_raw(input_data: bytes) -> str:
+def _transcribe_raw(input_data: bytes, model: str) -> str:
     """Transcribe a single audio input in raw audio data format using the Whisper API.
 
     Args:
@@ -81,5 +79,5 @@ def _transcribe_raw(input_data: bytes) -> str:
     Returns:
         The transcription output as a string.
     """
-    transcription = _call_whisper_api(input_data)
+    transcription = _call_whisper_api(input_data, model=model)
     return transcription

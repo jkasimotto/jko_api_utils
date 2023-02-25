@@ -1,13 +1,10 @@
 import io
-import os
 from pathlib import Path
 
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaIoBaseDownload
-from jko_api_utils.BatchAPIController import ApiCaller, BatchAPIController, FilePathGenerator
 
-from jko_api_utils.google.drive.service.get_service import get_service, get_service_with_service_or_secret_path
-from jko_api_utils.utils.save_data import DuplicateStrategy, save_to_file
+from jko_api_utils.google.drive.service.get_service import get_service_with_service_or_secret_path
 
 
 def download(
@@ -17,7 +14,7 @@ def download(
         exclude=None,
         return_data=True,
         create_dirs=True,
-        duplicate_strategy=DuplicateStrategy.SKIP,
+        duplicate_strategy="skip",
         client_secret=None,
         service=None,
 ):
@@ -31,7 +28,7 @@ def download(
         exclude (list of str, optional): A list of file names to exclude from the download. Defaults to None.
         return_data (bool, optional): Whether to return file content as a generator. Defaults to True.
         create_dirs (bool, optional): Whether to create the local directory if it doesn't exist. Defaults to True.
-        duplicate_strategy (DuplicateStrategy, optional): The strategy to use for files that already exist in the local directory. Defaults to DuplicateStrategy.SKIP.
+        duplicate_strategy (str, optional): The strategy to use for files that already exist in the local directory. Options are "skip", "overwrite", "rename". Defaults to "skip". 
         client_secret (str or Path, optional): The path to the Google Drive client secret file. Required if service is not provided. Defaults to None.
         service (googleapiclient.discovery.Resource, optional): An authenticated Google Drive API service object. Required if client_secret is not provided. Defaults to None.
 
@@ -65,16 +62,16 @@ def download(
             if local_folder_path is not None:
                 file_path = local_folder_path / file['name']
                 if file_path.exists():
-                    if duplicate_strategy == DuplicateStrategy.SKIP:
+                    if duplicate_strategy == "skip":
                         print(f"Skipping {file['name']}")
                         continue
-                    elif duplicate_strategy == DuplicateStrategy.RENAME:
+                    elif duplicate_strategy == "rename":
                         k = 1
                         while file_path.exists():
                             file_path = file_path.with_name(
                                 f"{file_path.stem}_{k}{file_path.suffix}")
                             k += 1
-                    elif duplicate_strategy == DuplicateStrategy.OVERWRITE:
+                    elif duplicate_strategy == "overwrite":
                         pass
 
             # Give the user the option to limit the number of files downloaded
